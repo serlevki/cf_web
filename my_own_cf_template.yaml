@@ -1,0 +1,252 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPCTEST
+
+Parameters:
+    EnvironmentName:
+      Default: serlevki
+      Description: An environment name that will be prefixed to resource names
+      Type: String
+
+    VPCMain:
+      Description: Please enter the IP range (CIDR notation) for this VPC
+      Type: String
+      Default: 10.192.0.0/16
+
+    PublicSubnetCIDR1:
+      Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+      Type: String
+      Default: 10.192.10.0/24
+
+    PublicSubnetCIDR2:
+      Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+      Type: String
+      Default: 10.192.11.0/24
+
+    PrivateSubnetCIDR1:
+      Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+      Type: String
+      Default: 10.192.20.0/24
+
+    PrivateSubnetCIDR2:
+      Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+      Type: String
+      Default: 10.192.21.0/24
+
+Resources:
+    VPC:
+      Type: AWS::EC2::VPC
+      Properties:
+        CidrBlock: !Ref VPCMain
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        Tags:
+          - Key: Name
+            Value: !Ref EnvironmentName
+      DeletionPolicy: Retain
+
+    InternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+          - Key: Name
+            Value: !Ref EnvironmentName
+      DependsOn: VPC
+
+    InternetGatewayAttachment:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        InternetGatewayId: !Ref InternetGateway
+        VpcId: !Ref VPC
+
+    PublicSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select [ 0, !GetAZs '' ]
+        CidrBlock: !Ref PublicSubnetCIDR1
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Public Subnet 1
+
+    PublicSubnet2:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select [ 1, !GetAZs '' ]
+        CidrBlock: !Ref PublicSubnetCIDR2
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Public Subnet 2
+
+    PrivateSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select [ 0, !GetAZs '' ]
+        CidrBlock: !Ref PrivateSubnetCIDR1
+        MapPublicIpOnLaunch: false
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Private Subnet 1
+
+    PrivateSubnet2:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: !Ref VPC
+        AvailabilityZone: !Select [ 0, !GetAZs '' ]
+        CidrBlock: !Ref PrivateSubnetCIDR2
+        MapPublicIpOnLaunch: false
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Private Subnet 2
+
+    PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Public Routes
+
+    PublicRouteDefault:
+      Type: AWS::EC2::Route
+      DependsOn: InternetGatewayAttachment
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: !Ref InternetGateway
+
+    PublicSubnetRouteTableAssociation1:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        SubnetId: !Ref PublicSubnet1
+
+    PublicSubnetRouteTableAssociation2:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref PublicRouteTable
+        SubnetId: !Ref PublicSubnet2
+
+    PrivateRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref VPC
+        Tags:
+          - Key: Name
+            Value: !Sub ${EnvironmentName} Private Routes
+
+    PrivateRouteDefault:
+      Type: AWS::EC2::Route
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        NatGatewayId: !Ref NatGateway
+
+    PrivateSubnetRouteTableAssociation1:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        SubnetId: !Ref PrivateSubnet1
+
+    PrivateSubnetRouteTableAssociation2:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        RouteTableId: !Ref PrivateRouteTable
+        SubnetId: !Ref PrivateSubnet2
+
+    NatGatewayEIP:
+      Type: AWS::EC2::EIP
+      DependsOn: InternetGatewayAttachment
+      Properties:
+        Domain: vpc
+
+    NatGateway:
+      Type: AWS::EC2::NatGateway
+      Properties:
+        AllocationId: !GetAtt NatGatewayEIP.AllocationId
+        SubnetId: !Ref PrivateSubnet1
+
+#dont forget add secont natgateway and EIP
+
+
+
+#----------------------EC2----------------------------------------------------
+
+    MyEC2InstancePriv:
+      Type: AWS::EC2::Instance
+      DependsOn: NatGateway
+      Properties:
+        ImageId: ami-010fae13a16763bb4
+        KeyName: frankfurt_kp
+        InstanceType: t2.micro
+        SubnetId: PrivateSubnet1
+        IAMRoleInstanceProfile: !Ref IAMRoleInstanceProfile
+
+    MyEC2InstancePub:
+      Type: AWS::EC2::Instance
+      DependsOn: PublicSubnet1
+      Properties:
+        ImageId: ami-010fae13a16763bb4
+        KeyName: frankfurt_kp
+        InstanceType: t2.micro
+        SubnetId: PublicSubnet1
+
+#------------------SG------------------------------------------------
+    MyPublicSG:
+      Type: AWS::EC2::SecurityGroup
+      DependsOn: MyEC2InstancePub
+      Properties:
+        GroupDescription: Bastion
+        SecurityGroupEgress:
+         -  CidrIp: 10.192.10.0/24
+            Description: Allow ssh and web
+            FromPort: 22, 80
+            IpProtocol: tcp
+            ToPort: 22, 80
+        SecurityGroupIngress:
+         -  CidrIp: 10.192.10.0/24
+            Description: Allow ssh and web
+            FromPort: 22, 80
+            IpProtocol: tcp
+            ToPort: 22, 80
+        VpcId: !Ref PublicSubnet1
+#-----------------S3------------------------------------------------------
+
+    S3Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: !Sub "s3bucket-${AWS::Region}-${AWS::AccountId}"
+
+#---------------IAM-------------------------------------------------------
+
+    IAMRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: "IAMRoleEC2toS3"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Principal:
+                Service:
+                  - "ec2.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Path: "/"
+        ManagedPolicyArns:
+          - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+
+    IAMRoleInstanceProfile:
+      Type: AWS::IAM::InstanceProfile
+      Properties:
+        InstanceProfileName: "IAMRoleEC2toS3InstanceProfile"
+        Path: "/"
+        Roles:
+        - Ref: "IAMRole"
+
+#------------LC and AS-------------------------------------------------
